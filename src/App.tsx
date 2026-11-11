@@ -1,5 +1,6 @@
 import {
   CSSProperties,
+  DragEvent,
   lazy,
   Suspense,
   useCallback,
@@ -10,6 +11,7 @@ import {
 } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Code2,
@@ -58,6 +60,12 @@ interface DocumentTab {
   sourcePath: string | null;
   markdown: string;
   savedMarkdown: string | null;
+}
+
+interface TabContextMenu {
+  documentId: number;
+  x: number;
+  y: number;
 }
 
 const SETTINGS_KEY = "markdown-editor.settings";
@@ -127,6 +135,10 @@ function importedFileName(path: string) {
   return fileName(path).replace(/\.[^.]+$/, "") + ".md";
 }
 
+function fileExtension(path: string) {
+  return path.split(".").pop()?.toLowerCase() ?? "";
+}
+
 function App() {
   const editorRef = useRef<EditorHandle>(null);
   const [documents, setDocuments] = useState<DocumentTab[]>([]);
@@ -141,7 +153,11 @@ function App() {
   const [workspacePath, setWorkspacePath] = useState<string | null>(null);
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [markmapOpen, setMarkmapOpen] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tabContextMenu, setTabContextMenu] = useState<TabContextMenu | null>(
+    null,
+  );
   const [settings, setSettings] = useState<EditorSettings>(loadSettings);
 
   const activeDocument = documents.find(
@@ -188,6 +204,24 @@ function App() {
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [settingsOpen]);
+
+  useEffect(() => {
+    if (!tabContextMenu) return;
+    const closeMenu = () => setTabContextMenu(null);
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeMenu();
+    };
+    window.addEventListener("pointerdown", closeMenu);
+    window.addEventListener("blur", closeMenu);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeMenu);
+      window.removeEventListener("blur", closeMenu);
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [tabContextMenu]);
 
   const updateDocument = useCallback(
     (id: number, patch: Partial<Omit<DocumentTab, "id">>) => {
@@ -336,6 +370,81 @@ function App() {
     }
   }, [documents, syncActiveDocument]);
 
+  const openDroppedFiles = useCallback(
+    async (files: File[]) => {
+      syncActiveDocument();
+      const openedDocuments: DocumentTab[] = [];
+      const unsupportedFiles: string[] = [];
+
+      for (const file of files) {
+        if (!MARKDOWN_EXTENSIONS.includes(fileExtension(file.name))) {
+          unsupportedFiles.push(file.name);
+          continue;
+        }
+        try {
+          const contents = await file.text();
+          openedDocuments.push(createDocument(contents, null, file.name));
+        } catch (error) {
+          setStatus(`打开失败：${String(error)}`);
+        }
+      }
+
+      if (openedDocuments.length > 0) {
+        setDocuments((current) => [...current, ...openedDocuments]);
+        setActiveDocumentId(openedDocuments[openedDocuments.length - 1].id);
+        setEditorRevision((revision) => revision + 1);
+        setStatus(`已打开 ${openedDocuments.length} 个文档`);
+      }
+      if (unsupportedFiles.length > 0) {
+        setStatus(
+          `仅支持拖入 Markdown：${unsupportedFiles.join("、")}，其他格式请用“导入”`,
+        );
+      }
+    },
+    [syncActiveDocument],
+  );
+
+  const dragDepth = useRef(0);
+  const isFileDrag = (event: DragEvent<HTMLElement>) =>
+    event.dataTransfer.types.includes("Files");
+
+  const handleDragEnter = (event: DragEvent<HTMLElement>) => {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    dragDepth.current += 1;
+    setDragActive(true);
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLElement>) => {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+
+  const handleDragLeave = () => {
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragActive(false);
+  };
+
+  const handleDrop = (event: DragEvent<HTMLElement>) => {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    dragDepth.current = 0;
+    setDragActive(false);
+    const files = Array.from(event.dataTransfer.files);
+    if (files.length > 0) void openDroppedFiles(files);
+  };
+
+  useEffect(() => {
+    const prevent = (event: Event) => event.preventDefault();
+    window.addEventListener("dragover", prevent);
+    window.addEventListener("drop", prevent);
+    return () => {
+      window.removeEventListener("dragover", prevent);
+      window.removeEventListener("drop", prevent);
+    };
+  }, []);
+
   const saveDocument = useCallback(
     async (saveAs = false) => {
       if (activeDocumentId === null) return;
@@ -421,6 +530,46 @@ function App() {
     setEditorRevision((revision) => revision + 1);
   };
 
+  const revealDocument = async (documentId: number) => {
+    const document = documents.find((item) => item.id === documentId);
+    setTabContextMenu(null);
+    if (!document) return;
+
+    let documentPath = document.path ?? document.sourcePath;
+    if (!documentPath) {
+      const target = await save({
+        defaultPath: document.name,
+        filters: [{ name: "Markdown", extensions: ["md"] }],
+      });
+      if (!target) return;
+
+      try {
+        const markdown =
+          document.id === activeDocumentId
+            ? syncActiveDocument()
+            : document.markdown;
+        await writeTextFile(target, markdown);
+        updateDocument(document.id, {
+          name: fileName(target),
+          path: target,
+          markdown,
+          savedMarkdown: markdown,
+        });
+        documentPath = target;
+      } catch (error) {
+        setStatus(`保存失败：${String(error)}`);
+        return;
+      }
+    }
+
+    try {
+      await revealItemInDir(documentPath);
+      setStatus(`已打开 ${document.name} 所在位置`);
+    } catch (error) {
+      setStatus(`打开文件位置失败：${String(error)}`);
+    }
+  };
+
   const changeActiveMarkdown = useCallback(
     (nextMarkdown: string) => {
       if (activeDocumentId === null) return;
@@ -491,6 +640,10 @@ function App() {
     <main
       className={`${dark ? "app app-dark" : "app"}${settings.typewriterMode ? " typewriter-mode" : ""}`}
       style={appStyle}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
       <header className="app-header">
         <div className="brand">
@@ -644,6 +797,15 @@ function App() {
               className={`document-tab ${isActive ? "active" : ""}`}
               role="tab"
               aria-selected={isActive}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                selectDocument(document.id);
+                setTabContextMenu({
+                  documentId: document.id,
+                  x: Math.min(event.clientX, window.innerWidth - 190),
+                  y: Math.min(event.clientY, window.innerHeight - 54),
+                });
+              }}
             >
               <button
                 type="button"
@@ -732,6 +894,14 @@ function App() {
         </button>
       </footer>
 
+      {dragActive && (
+        <div className="drop-overlay" aria-hidden="true">
+          <FileInput />
+          <p>松开以打开文档</p>
+          <span>支持 Markdown 文档，其他格式请使用“导入”</span>
+        </div>
+      )}
+
       {settingsOpen && (
         <SettingsPanel
           settings={settings}
@@ -739,6 +909,36 @@ function App() {
           onClose={() => setSettingsOpen(false)}
         />
       )}
+
+      {tabContextMenu &&
+        (() => {
+          const contextDocument = documents.find(
+            (document) => document.id === tabContextMenu.documentId,
+          );
+          const hasPath = Boolean(
+            contextDocument?.path ?? contextDocument?.sourcePath,
+          );
+          return (
+            <div
+              className="tab-context-menu"
+              role="menu"
+              aria-label="文档标签页操作"
+              style={{ left: tabContextMenu.x, top: tabContextMenu.y }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void revealDocument(tabContextMenu.documentId)}
+              >
+                <FolderOpen aria-hidden="true" />
+                <span>
+                  {hasPath ? "打开文件位置" : "另存为并打开文件位置"}
+                </span>
+              </button>
+            </div>
+          );
+        })()}
     </main>
   );
 }

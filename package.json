@@ -22,10 +22,10 @@
     "@milkdown/preset-commonmark": "^7.22.2",
     "@milkdown/preset-gfm": "^7.22.2",
     "@milkdown/utils": "^7.22.2",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-dialog": "^2.7.3",
-    "@tauri-apps/plugin-fs": "^2.5.2",
-    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/api": "2.12.4",
+    "@tauri-apps/plugin-dialog": "2.8.4",
+    "@tauri-apps/plugin-fs": "2.7.1",
+    "@tauri-apps/plugin-opener": "2.7.3",
     "codemirror": "^6.0.2",
     "lucide-react": "^1.48.0",
     "markmap-lib": "^0.18.12",
@@ -35,7 +35,7 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
+    "@tauri-apps/cli": "2.12.4",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^6.0.2",

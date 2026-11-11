@@ -312,6 +312,48 @@ button {
   height: 14px;
 }
 
+.tab-context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 176px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+
+.tab-context-menu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tab-context-menu button:hover:not(:disabled),
+.tab-context-menu button:focus-visible {
+  background: var(--hover);
+}
+
+.tab-context-menu button:disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.55;
+}
+
+.tab-context-menu svg {
+  width: 16px;
+  height: 16px;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -1531,6 +1573,39 @@ button {
 .source-editor .cm-scroller::-webkit-scrollbar-thumb:hover {
   background: var(--muted);
   background-clip: content-box;
+}
+
+/* 拖入文件时的全窗口提示 */
+.drop-overlay {
+  position: fixed;
+  z-index: 300;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 24px;
+  border: 2px dashed var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--app-bg) 84%, transparent);
+  pointer-events: none;
+  text-align: center;
+}
+
+.drop-overlay svg {
+  width: 40px;
+  height: 40px;
+}
+
+.drop-overlay p {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.drop-overlay span {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 @media (max-width: 720px) {
